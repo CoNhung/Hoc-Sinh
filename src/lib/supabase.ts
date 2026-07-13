@@ -46,6 +46,7 @@ export type PaymentRow = {
   status: 'full' | 'partial' | 'unpaid';
   note: string | null;
   payment_method: string | null;
+  amount: number | null;
   created_at: string;
 };
 

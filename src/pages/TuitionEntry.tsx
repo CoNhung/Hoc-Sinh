@@ -1,13 +1,15 @@
 import { useMemo, useRef, useState } from 'react';
-import { Wallet, Search, CheckCircle2, Clock, XCircle, Trash2, FileSpreadsheet, Banknote, CreditCard } from 'lucide-react';
+import { Wallet, Search, CheckCircle2, Clock, XCircle, Trash2, FileSpreadsheet, Banknote, CreditCard, BookOpen } from 'lucide-react';
 import { Card, Button, Select, Input, Badge, Spinner, EmptyState } from '../components/ui';
-import { useStudents, usePayments } from '../lib/hooks';
+import { useStudents, usePayments, useSubjects, useStudentSubjects } from '../lib/hooks';
 import { supabase } from '../lib/supabase';
 import { exportPaidExcel } from '../lib/excel';
 
 export default function TuitionEntry() {
   const { students, loading: lS } = useStudents();
   const { payments, loading: lP, refresh } = usePayments();
+  const { subjects } = useSubjects();
+  const { rows: studentSubjects } = useStudentSubjects();
 
   const [search, setSearch] = useState('');
   const [classFilter, setClassFilter] = useState('');
@@ -20,6 +22,7 @@ export default function TuitionEntry() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const [amount, setAmount] = useState('');
   const [payStatus, setPayStatus] = useState('full');
   const [payMethod, setPayMethod] = useState('cash');
   const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10));
@@ -27,6 +30,7 @@ export default function TuitionEntry() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [lastSavedId, setLastSavedId] = useState<number | null>(null);
 
   const classes = useMemo(() => {
     const map = new Map<string, { id: number; name: string; grade: number }>();
@@ -56,6 +60,17 @@ export default function TuitionEntry() {
       });
   }, [students, monthPayments, search, classFilter]);
 
+  // Sort: last saved student first, then by name
+  const orderedStudents = useMemo(() => {
+    return [...filteredStudents].sort((a, b) => {
+      if (lastSavedId !== null) {
+        if (a.id === lastSavedId) return -1;
+        if (b.id === lastSavedId) return 1;
+      }
+      return a.name.localeCompare(b.name, 'vi');
+    });
+  }, [filteredStudents, lastSavedId]);
+
   const suggestions = useMemo(() => {
     if (!studentName.trim()) return [];
     const q = studentName.toLowerCase().trim();
@@ -63,6 +78,19 @@ export default function TuitionEntry() {
       .filter((s) => s.name.toLowerCase().includes(q))
       .slice(0, 8);
   }, [students, studentName]);
+
+  const matchedSubjects = useMemo(() => {
+    if (!matchedStudent) return [];
+    const ssIds = studentSubjects
+      .filter((ss) => ss.student_id === matchedStudent)
+      .map((ss) => ss.subject_id);
+    return subjects.filter((s) => ssIds.includes(s.id));
+  }, [matchedStudent, studentSubjects, subjects]);
+
+  const getSubjectNames = (studentId: number): string => {
+    const ssIds = studentSubjects.filter((ss) => ss.student_id === studentId).map((ss) => ss.subject_id);
+    return subjects.filter((s) => ssIds.includes(s.id)).map((s) => s.name).join(', ');
+  };
 
   const paymentStatusFor = (studentId: number) => {
     const p = monthPayments.find((x) => x.student_id === studentId);
@@ -91,6 +119,7 @@ export default function TuitionEntry() {
     }
     setSaving(true);
     try {
+      const amountNum = amount ? Number(amount) : 0;
       const existing = monthPayments.find((p) => p.student_id === matchedStudent);
       if (existing) {
         const { error: e } = await supabase
@@ -99,6 +128,7 @@ export default function TuitionEntry() {
             status: payStatus,
             payment_method: payMethod,
             payment_date: payDate,
+            amount: amountNum,
             note: note.trim() || null,
           })
           .eq('id', existing.id);
@@ -112,12 +142,15 @@ export default function TuitionEntry() {
           payment_date: payDate,
           status: payStatus,
           payment_method: payMethod,
+          amount: amountNum,
           note: note.trim() || null,
         });
         if (e) throw e;
         setSuccess('Đã ghi nhận học phí');
       }
+      setLastSavedId(matchedStudent);
       setNote('');
+      setAmount('');
       setStudentName('');
       setMatchedStudent(null);
       await refresh();
@@ -138,6 +171,18 @@ export default function TuitionEntry() {
     exportPaidExcel(monthPayments, Number(month), Number(year));
   };
 
+  const totalAmount = useMemo(() => {
+    return orderedStudents.reduce((sum, s) => {
+      const p = paymentStatusFor(s.id);
+      return sum + (p?.amount ? Number(p.amount) : 0);
+    }, 0);
+  }, [orderedStudents, monthPayments]);
+
+  const fmtVND = (n: number | null | undefined) => {
+    if (!n) return '—';
+    return new Intl.NumberFormat('vi-VN').format(Number(n)) + ' đ';
+  };
+
   if (lS || lP) return <Spinner />;
 
   return (
@@ -149,8 +194,8 @@ export default function TuitionEntry() {
           Nhập học phí
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Typeahead student name */}
-          <div className="relative">
+          {/* Typeahead student name + auto subjects */}
+          <div className="relative sm:col-span-2 lg:col-span-1">
             <label className="block text-sm font-medium text-slate-700 mb-1.5">
               Tên học sinh <span className="text-rose-500">*</span>
             </label>
@@ -190,6 +235,32 @@ export default function TuitionEntry() {
             )}
           </div>
 
+          {/* Auto-filled subjects display */}
+          <div className="sm:col-span-2 lg:col-span-1">
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">
+              Các môn học
+            </label>
+            <div className="min-h-[38px] px-3 py-2 rounded-lg border border-slate-200 bg-slate-50/50 text-sm flex flex-wrap gap-1.5 items-center">
+              {matchedStudent ? (
+                matchedSubjects.length > 0 ? (
+                  matchedSubjects.map((sub) => (
+                    <span
+                      key={sub.id}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-700 text-xs font-medium"
+                    >
+                      <BookOpen className="w-3 h-3" />
+                      {sub.name}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-slate-400 text-xs">Chưa đăng ký môn học</span>
+                )
+              ) : (
+                <span className="text-slate-400 text-xs">Chọn học sinh để xem môn học</span>
+              )}
+            </div>
+          </div>
+
           <Select
             label="Tháng"
             value={month}
@@ -206,6 +277,13 @@ export default function TuitionEntry() {
             })}
           />
           <Input label="Ngày đóng" type="date" value={payDate} onChange={setPayDate} />
+          <Input
+            label="Số tiền (VNĐ)"
+            type="number"
+            value={amount}
+            onChange={setAmount}
+            placeholder="0"
+          />
           <Select
             label="Trạng thái"
             value={payStatus}
@@ -281,6 +359,7 @@ export default function TuitionEntry() {
         </select>
         <div className="text-sm text-slate-500 self-center sm:ml-auto">
           Tháng <span className="font-semibold text-slate-700">{month}/{year}</span>
+          <span className="ml-4">Tổng: <span className="font-bold text-emerald-600">{fmtVND(totalAmount)}</span></span>
         </div>
         <Button variant="secondary" onClick={handleExport} disabled={monthPayments.length === 0}>
           <FileSpreadsheet className="w-4 h-4" />
@@ -290,7 +369,7 @@ export default function TuitionEntry() {
 
       {/* Payment table */}
       <Card className="overflow-hidden">
-        {filteredStudents.length === 0 ? (
+        {orderedStudents.length === 0 ? (
           <EmptyState message="Chưa có học sinh nào đóng học phí trong tháng này" icon={<Wallet className="w-10 h-10 text-slate-300" />} />
         ) : (
           <div className="overflow-x-auto">
@@ -300,7 +379,9 @@ export default function TuitionEntry() {
                   <th className="text-left px-4 py-3 font-semibold">STT</th>
                   <th className="text-left px-4 py-3 font-semibold">Học sinh</th>
                   <th className="text-left px-4 py-3 font-semibold">Lớp</th>
+                  <th className="text-left px-4 py-3 font-semibold">Môn học</th>
                   <th className="text-left px-4 py-3 font-semibold">SĐT</th>
+                  <th className="text-right px-4 py-3 font-semibold">Số tiền</th>
                   <th className="text-left px-4 py-3 font-semibold">Trạng thái</th>
                   <th className="text-left px-4 py-3 font-semibold">Phương thức</th>
                   <th className="text-left px-4 py-3 font-semibold">Ngày đóng</th>
@@ -309,16 +390,29 @@ export default function TuitionEntry() {
                 </tr>
               </thead>
               <tbody>
-                {filteredStudents.map((s, i) => {
+                {orderedStudents.map((s, i) => {
                   const p = paymentStatusFor(s.id);
+                  const isNew = s.id === lastSavedId;
                   return (
-                    <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50/50 transition">
-                      <td className="px-4 py-3 text-slate-500">{i + 1}</td>
+                    <tr key={s.id} className={`border-t border-slate-100 hover:bg-slate-50/50 transition ${isNew ? 'bg-emerald-50/40' : ''}`}>
+                      <td className="px-4 py-3 text-slate-500">
+                        {isNew ? (
+                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500 text-white text-xs font-bold">1</span>
+                        ) : (
+                          i + 1
+                        )}
+                      </td>
                       <td className="px-4 py-3 font-medium text-slate-800">{s.name}</td>
                       <td className="px-4 py-3 text-slate-600">
                         {s.classes ? `Lớp ${s.classes.name}` : '—'}
                       </td>
+                      <td className="px-4 py-3 text-slate-600 text-xs">
+                        {getSubjectNames(s.id) || '—'}
+                      </td>
                       <td className="px-4 py-3 text-slate-600">{s.phone}</td>
+                      <td className="px-4 py-3 text-right font-medium text-slate-700">
+                        {p?.amount ? fmtVND(p.amount) : '—'}
+                      </td>
                       <td className="px-4 py-3">
                         {p?.status === 'full' && (
                           <Badge color="emerald">

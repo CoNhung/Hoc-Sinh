@@ -135,7 +135,7 @@ export default function RecentPayments() {
           <h3 className="font-bold text-slate-800">
             Giao dịch tháng {month}/{year}
           </h3>
-          <span className="text-sm text-slate-500">{filtered.length} giao dịch</span>
+          <span className="text-sm text-slate-500">{filtered.length} giao dịch · Tổng: <span className="font-bold text-emerald-600">{new Intl.NumberFormat('vi-VN').format(filtered.reduce((sum, p) => sum + (p.amount ? Number(p.amount) : 0), 0))} đ</span></span>
         </div>
 
         {filtered.length === 0 ? (
@@ -153,6 +153,7 @@ export default function RecentPayments() {
                   <th className="pb-3 font-medium">Lớp</th>
                   <th className="pb-3 font-medium">SĐT</th>
                   <th className="pb-3 font-medium">Môn đăng ký</th>
+                  <th className="pb-3 font-medium text-right">Số tiền</th>
                   <th className="pb-3 font-medium">Ngày đóng</th>
                   <th className="pb-3 font-medium">Trạng thái</th>
                   <th className="pb-3 font-medium">Phương thức</th>
@@ -171,6 +172,9 @@ export default function RecentPayments() {
                       </td>
                       <td className="py-3 text-slate-600">{p.students?.phone || '—'}</td>
                       <td className="py-3 text-slate-600">{getSubjectNames(p.student_id) || '—'}</td>
+                      <td className="py-3 text-right font-medium text-slate-700">
+                        {p.amount ? new Intl.NumberFormat('vi-VN').format(Number(p.amount)) + ' đ' : '—'}
+                      </td>
                       <td className="py-3 text-slate-600">
                         {new Date(p.payment_date).toLocaleDateString('vi-VN')}
                       </td>
