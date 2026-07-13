@@ -119,7 +119,7 @@ export default function TuitionEntry() {
     }
     setSaving(true);
     try {
-      const amountNum = amount ? Number(amount) : 0;
+      const amountNum = amount ? Number(amount) * 1000 : 0;
       const existing = monthPayments.find((p) => p.student_id === matchedStudent);
       if (existing) {
         const { error: e } = await supabase
@@ -278,7 +278,7 @@ export default function TuitionEntry() {
           />
           <Input label="Ngày đóng" type="date" value={payDate} onChange={setPayDate} />
           <Input
-            label="Số tiền (VNĐ)"
+            label="Số tiền (nghìn VNĐ)"
             type="number"
             value={amount}
             onChange={setAmount}
